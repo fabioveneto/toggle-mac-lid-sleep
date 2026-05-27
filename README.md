@@ -6,8 +6,9 @@ or long-running tasks alive on a MacBook.
 **💻 Open laptop icon** = one or both features are active  
 **🖥 Closed MacBook icon** = both features off, normal sleep behaviour
 
-> **Caution:** preventing sleep traps heat and drains the battery faster.
-> Using either feature on AC power is recommended.
+> **Caution:** disabling lid-close sleep traps heat in a closed chassis and drains the battery
+> faster. Using that feature on AC power is recommended. Caffeinate (lid open) has no such
+> restriction — the lid is open and the machine ventilates normally.
 
 ---
 
@@ -18,17 +19,21 @@ Two independent toggles in the menu bar:
 | Toggle | What it does | Requires root |
 |---|---|---|
 | **Disable lid-close sleep** | Runs `pmset -a disablesleep 1` — lid can close without the Mac sleeping. Useful for running agents on a closed laptop. | Yes (sudoers rule) |
-| **Caffeinate (lid open)** | Runs `caffeinate -di` — prevents both display sleep and idle sleep while the lid is open. Works on battery and AC. | No |
+| **Caffeinate (lid open)** | Runs `caffeinate -i` — prevents idle sleep while the lid is open (display may still turn off). Works on battery and AC. | No |
 
 Both toggles remember their state across restarts.
 
-While either feature is ON, a watchdog monitors two signals and **automatically disables both** (and
-sends a macOS notification) if either persists for 30 seconds:
+**Lid-close sleep** has a thermal safeguard: while it is ON, a watchdog monitors two signals and
+**automatically re-enables sleep** (and sends a macOS notification) if either persists for 30
+seconds:
 
 | Signal | Default trip threshold |
 |---|---|
 | Thermal pressure (macOS thermal state) | ≥ Serious |
 | CPU usage | ≥ 60% |
+
+**Caffeinate has no safeguard** — with the lid open the machine ventilates normally, so there is no
+heat risk to guard against.
 
 Thresholds are one-line constants at the top of `Sources/main.swift`.
 
@@ -132,9 +137,9 @@ Trip at Thermal ≥ Serious or CPU ≥ 60%
 Quit
 ```
 
-- **Disable lid-close sleep** — prevents sleep when the lid closes (checkmark = active)
-- **Caffeinate (lid open)** — prevents display + idle sleep while the lid is open (checkmark = active)
-- **Thermal / CPU Usage** — live readings, updated every 12 seconds while either feature is ON
+- **Disable lid-close sleep** — prevents sleep when the lid closes (checkmark = active); thermal watchdog runs while this is ON
+- **Caffeinate (lid open)** — prevents idle sleep while the lid is open; display may still turn off (checkmark = active); no watchdog
+- **Thermal / CPU Usage** — live readings, shown only while lid-close sleep is ON
 - **Quit** — restores `disablesleep 0` and kills caffeinate before exiting
 
 ---

@@ -91,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if on {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-            p.arguments = ["-di"]   // -d: prevent display sleep  -i: prevent idle sleep
+            p.arguments = ["-i"]    // -i: prevent idle sleep (display may still turn off)
             try! p.run()
             caffeinateProcess = p
         } else {
@@ -103,9 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
-    // Start watchdog when any feature is ON; stop when all are OFF.
+    // Watchdog only runs for lid-close sleep (lid closed = heat risk). Caffeinate needs no safeguard.
     private func updateWatchdog() {
-        let active = keepAwake || isCaffeinating
+        let active = keepAwake
         if active && watchdogTimer == nil {
             prevTicks = nil; hotSince = nil
             startWatchdog()
@@ -148,11 +148,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             i.isEnabled = false; return i
         }
 
-        let watching = keepAwake || isCaffeinating
-        m.addItem(info(watching
+        m.addItem(info(keepAwake
             ? (lastThermal.map { "Thermal: \(thermalName($0))" } ?? "Thermal: measuring…")
             : "Thermal: —"))
-        m.addItem(info(watching
+        m.addItem(info(keepAwake
             ? (lastCPU.map { String(format: "CPU Usage: %.0f%%", $0) } ?? "CPU Usage: measuring…")
             : "CPU Usage: —"))
         m.addItem(info("Trip at Thermal ≥ Serious or CPU ≥ \(Int(cpuThresholdPct))%"))
@@ -207,10 +206,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let t = thermalName(thermal)
         let c = cpu.map { String(format: "%.0f%%", $0) } ?? "n/a"
         NSLog("[ToggleSleep] safeguard tripped — thermal:%@ cpu:%@", t, c)
-        keepAwake    = false
-        isCaffeinating = false
+        keepAwake = false
         notify(title: "Toggle Sleep — Safeguard",
-               body:  "Too hot (Thermal: \(t) / CPU: \(c)). All features disabled.")
+               body:  "Too hot (Thermal: \(t) / CPU: \(c)). Lid-close sleep re-enabled.")
     }
 
     // MARK: - CPU usage (main thread only)
