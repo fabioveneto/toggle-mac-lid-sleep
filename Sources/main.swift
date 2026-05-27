@@ -5,7 +5,7 @@ import Foundation
 // Thermal state order: nominal < fair < serious < critical
 let thermalTripState = ProcessInfo.ThermalState.serious  // trip when state reaches this or above
 let cpuThresholdPct  = 60.0   // overall CPU busy % — lower = more protective
-let pollIntervalSec  = 12.0   // seconds between CPU polls (only while toggle is ON)
+let pollIntervalSec  = 12.0   // seconds between CPU polls (only while a feature is ON)
 let sustainSec       = 30.0   // condition must persist this long before tripping
 
 // MARK: - Process helpers
@@ -47,10 +47,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastCPU: Double?
     // CPU tick baseline; only read/written on main thread
     private var prevTicks: (u: UInt32, s: UInt32, i: UInt32, n: UInt32)?
+    // Long-lived caffeinate child process (no root needed)
+    private var caffeinateProcess: Process?
 
     private var keepAwake: Bool {
         get { UserDefaults.standard.bool(forKey: "keepAwake") }
-        set { UserDefaults.standard.set(newValue, forKey: "keepAwake"); applyState(newValue) }
+        set { UserDefaults.standard.set(newValue, forKey: "keepAwake"); applyLidSleep(newValue) }
+    }
+
+    private var isCaffeinating: Bool {
+        get { UserDefaults.standard.bool(forKey: "isCaffeinating") }
+        set { UserDefaults.standard.set(newValue, forKey: "isCaffeinating"); applyCaffeinate(newValue) }
     }
 
     func applicationDidFinishLaunching(_: Notification) {
@@ -62,29 +69,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: ProcessInfo.thermalStateDidChangeNotification,
             object: nil)
         rebuildMenu()
-        applyState(keepAwake)
+        applyLidSleep(keepAwake)
+        applyCaffeinate(isCaffeinating)
     }
 
     func applicationWillTerminate(_: Notification) {
         if keepAwake { setPmset(false) }
+        caffeinateProcess?.terminate()
     }
 
-    // MARK: State
+    // MARK: - Feature state
 
-    private func applyState(_ on: Bool) {
+    private func applyLidSleep(_ on: Bool) {
         setPmset(on)
-        updateIcon(on)
-        if on {
-            prevTicks = nil; hotSince = nil
-            startWatchdog()
-        } else {
-            stopWatchdog()
-            lastThermal = nil; lastCPU = nil
-        }
+        updateWatchdog()
+        updateIcon()
         rebuildMenu()
     }
 
-    private func updateIcon(_ on: Bool) {
+    private func applyCaffeinate(_ on: Bool) {
+        if on {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+            p.arguments = ["-di"]   // -d: prevent display sleep  -i: prevent idle sleep
+            try! p.run()
+            caffeinateProcess = p
+        } else {
+            caffeinateProcess?.terminate()
+            caffeinateProcess = nil
+        }
+        updateWatchdog()
+        updateIcon()
+        rebuildMenu()
+    }
+
+    // Start watchdog when any feature is ON; stop when all are OFF.
+    private func updateWatchdog() {
+        let active = keepAwake || isCaffeinating
+        if active && watchdogTimer == nil {
+            prevTicks = nil; hotSince = nil
+            startWatchdog()
+        } else if !active && watchdogTimer != nil {
+            stopWatchdog()
+            lastThermal = nil; lastCPU = nil
+        }
+    }
+
+    private func updateIcon() {
+        let on = keepAwake || isCaffeinating
         let name = on ? "laptopcomputer" : "macbook"
         if let img = NSImage(systemSymbolName: name, accessibilityDescription: nil) {
             img.isTemplate = true
@@ -97,16 +129,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildMenu() {
         let m = NSMenu()
 
-        let hdr = NSMenuItem(title: "Keep Awake: \(keepAwake ? "ON" : "OFF")",
-                             action: nil, keyEquivalent: "")
-        hdr.isEnabled = false
-        m.addItem(hdr)
+        let lidToggle = NSMenuItem(title: "Disable lid-close sleep",
+                                   action: #selector(onLidToggle), keyEquivalent: "")
+        lidToggle.state  = keepAwake ? .on : .off
+        lidToggle.target = self
+        m.addItem(lidToggle)
 
-        let tog = NSMenuItem(title: "Disable lid-close sleep",
-                             action: #selector(onToggle), keyEquivalent: "")
-        tog.state  = keepAwake ? .on : .off
-        tog.target = self
-        m.addItem(tog)
+        let cafToggle = NSMenuItem(title: "Caffeinate (lid open)",
+                                   action: #selector(onCafToggle), keyEquivalent: "")
+        cafToggle.state  = isCaffeinating ? .on : .off
+        cafToggle.target = self
+        m.addItem(cafToggle)
 
         m.addItem(.separator())
 
@@ -115,15 +148,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             i.isEnabled = false; return i
         }
 
-        if keepAwake {
-            let thermalStr = lastThermal.map { thermalName($0) } ?? "measuring…"
-            let cpuStr     = lastCPU.map { String(format: "%.0f%%", $0) } ?? "measuring…"
-            m.addItem(info("Thermal: \(thermalStr)"))
-            m.addItem(info("CPU Usage: \(cpuStr)"))
-        } else {
-            m.addItem(info("Thermal: —"))
-            m.addItem(info("CPU Usage: —"))
-        }
+        let watching = keepAwake || isCaffeinating
+        m.addItem(info(watching
+            ? (lastThermal.map { "Thermal: \(thermalName($0))" } ?? "Thermal: measuring…")
+            : "Thermal: —"))
+        m.addItem(info(watching
+            ? (lastCPU.map { String(format: "CPU Usage: %.0f%%", $0) } ?? "CPU Usage: measuring…")
+            : "CPU Usage: —"))
         m.addItem(info("Trip at Thermal ≥ Serious or CPU ≥ \(Int(cpuThresholdPct))%"))
 
         m.addItem(.separator())
@@ -132,9 +163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = m
     }
 
-    @objc private func onToggle() { keepAwake = !keepAwake }
+    @objc private func onLidToggle() { keepAwake = !keepAwake }
+    @objc private func onCafToggle() { isCaffeinating = !isCaffeinating }
 
-    // MARK: Watchdog
+    // MARK: - Watchdog
 
     private func startWatchdog() {
         watchdogTimer?.invalidate()
@@ -151,8 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func thermalStateChanged() {
-        // Instant reaction to OS thermal events while toggle is ON
-        guard keepAwake else { return }
+        guard keepAwake || isCaffeinating else { return }
         poll()
     }
 
@@ -176,12 +207,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let t = thermalName(thermal)
         let c = cpu.map { String(format: "%.0f%%", $0) } ?? "n/a"
         NSLog("[ToggleSleep] safeguard tripped — thermal:%@ cpu:%@", t, c)
-        keepAwake = false
+        keepAwake    = false
+        isCaffeinating = false
         notify(title: "Toggle Sleep — Safeguard",
-               body:  "Too hot (Thermal: \(t) / CPU: \(c)). Sleep re-enabled.")
+               body:  "Too hot (Thermal: \(t) / CPU: \(c)). All features disabled.")
     }
 
-    // MARK: CPU usage (main thread only)
+    // MARK: - CPU usage (main thread only)
 
     private func cpuUsagePct() -> Double? {
         var info  = host_cpu_load_info()

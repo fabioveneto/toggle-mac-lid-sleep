@@ -1,22 +1,28 @@
 # Toggle Sleep
 
-A macOS menu bar app that prevents your MacBook from sleeping when the lid is closed — useful for
-keeping AI agents or long-running tasks alive on a closed laptop.
+A macOS menu bar app with two independent sleep-prevention features — useful for keeping AI agents
+or long-running tasks alive on a MacBook.
 
-**💻 Open laptop icon** = sleep is disabled (toggle ON)  
-**🖥 Closed MacBook icon** = normal sleep behaviour (toggle OFF)
+**💻 Open laptop icon** = one or both features are active  
+**🖥 Closed MacBook icon** = both features off, normal sleep behaviour
 
-> **Caution:** disabling lid-close sleep traps heat in a closed chassis and drains the battery
-> faster. Intended for use on AC power.
+> **Caution:** preventing sleep traps heat and drains the battery faster.
+> Using either feature on AC power is recommended.
 
 ---
 
 ## What it does
 
-Clicking the toggle runs `pmset -a disablesleep 1`, which tells macOS not to sleep when the lid
-closes. Clicking again restores normal behaviour with `pmset -a disablesleep 0`.
+Two independent toggles in the menu bar:
 
-While the toggle is ON, a watchdog monitors two signals and **automatically re-enables sleep** (and
+| Toggle | What it does | Requires root |
+|---|---|---|
+| **Disable lid-close sleep** | Runs `pmset -a disablesleep 1` — lid can close without the Mac sleeping. Useful for running agents on a closed laptop. | Yes (sudoers rule) |
+| **Caffeinate (lid open)** | Runs `caffeinate -di` — prevents both display sleep and idle sleep while the lid is open. Works on battery and AC. | No |
+
+Both toggles remember their state across restarts.
+
+While either feature is ON, a watchdog monitors two signals and **automatically disables both** (and
 sends a macOS notification) if either persists for 30 seconds:
 
 | Signal | Default trip threshold |
@@ -116,19 +122,20 @@ This will:
 Click the menu bar icon to open the menu:
 
 ```
-Keep Awake: OFF
 ☑ Disable lid-close sleep
-─────────────────────────
+☐ Caffeinate (lid open)
+──────────────────────────────
 Thermal: Nominal
 CPU Usage: 4%
 Trip at Thermal ≥ Serious or CPU ≥ 60%
-─────────────────────────
+──────────────────────────────
 Quit
 ```
 
-- **Disable lid-close sleep** — toggles the feature on/off (checkmark = active)
-- **Thermal / CPU Usage** — live readings, updated every 12 seconds while ON
-- **Quit** — restores `disablesleep 0` before exiting
+- **Disable lid-close sleep** — prevents sleep when the lid closes (checkmark = active)
+- **Caffeinate (lid open)** — prevents display + idle sleep while the lid is open (checkmark = active)
+- **Thermal / CPU Usage** — live readings, updated every 12 seconds while either feature is ON
+- **Quit** — restores `disablesleep 0` and kills caffeinate before exiting
 
 ---
 
