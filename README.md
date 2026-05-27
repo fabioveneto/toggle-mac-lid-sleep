@@ -32,8 +32,12 @@ seconds:
 | Thermal pressure (macOS thermal state) | ≥ Serious |
 | CPU usage | ≥ 60% |
 
-**Caffeinate has no safeguard** — with the lid open the machine ventilates normally, so there is no
-heat risk to guard against.
+**Caffeinate has no thermal safeguard** — with the lid open the machine ventilates normally, so
+there is no heat risk to guard against.
+
+**Caffeinate turns itself off when you close the lid.** `caffeinate -i` prevents idle sleep but
+does not block lid-close sleep, so the Mac still sleeps when the lid closes. The app detects this
+and automatically unchecks caffeinate, so the toggle is never left on by mistake.
 
 Thresholds are one-line constants at the top of `Sources/main.swift`.
 

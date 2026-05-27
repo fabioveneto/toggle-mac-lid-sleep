@@ -68,6 +68,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selector: #selector(thermalStateChanged),
             name: ProcessInfo.thermalStateDidChangeNotification,
             object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemWillSleep),
+            name: NSWorkspace.willSleepNotification,
+            object: nil)
         rebuildMenu()
         applyLidSleep(keepAwake)
         applyCaffeinate(isCaffeinating)
@@ -179,6 +184,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let thermal = ProcessInfo.processInfo.thermalState
         let cpu     = cpuUsagePct()
         onPollResult(thermal: thermal, cpu: cpu)
+    }
+
+    @objc private func systemWillSleep() {
+        // caffeinate -i doesn't block lid-close sleep, so if the system is sleeping
+        // and keepAwake is off, the lid just closed — turn caffeinate off automatically.
+        guard isCaffeinating && !keepAwake else { return }
+        isCaffeinating = false
     }
 
     @objc private func thermalStateChanged() {
