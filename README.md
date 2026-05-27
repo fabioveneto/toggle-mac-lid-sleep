@@ -1,21 +1,27 @@
 # Toggle Sleep
 
-A macOS menu bar app that prevents your MacBook from sleeping when the lid is closed — useful for keeping AI agents or long-running tasks alive on a closed laptop.
+A macOS menu bar app that prevents your MacBook from sleeping when the lid is closed — useful for
+keeping AI agents or long-running tasks alive on a closed laptop.
 
-![OFF](docs/off.png) Closed MacBook icon = sleep works normally  
-![ON](docs/on.png) Open laptop icon = lid-close sleep is disabled
+**💻 Open laptop icon** = sleep is disabled (toggle ON)  
+**🖥 Closed MacBook icon** = normal sleep behaviour (toggle OFF)
+
+> **Caution:** disabling lid-close sleep traps heat in a closed chassis and drains the battery
+> faster. Intended for use on AC power.
 
 ---
 
 ## What it does
 
-Clicking the toggle runs `pmset -a disablesleep 1`, which tells macOS not to sleep when the lid closes. Clicking again restores normal behaviour with `pmset -a disablesleep 0`.
+Clicking the toggle runs `pmset -a disablesleep 1`, which tells macOS not to sleep when the lid
+closes. Clicking again restores normal behaviour with `pmset -a disablesleep 0`.
 
-While the toggle is ON, a watchdog monitors two signals and **automatically re-enables sleep** (and sends a notification) if either persists for 30 seconds:
+While the toggle is ON, a watchdog monitors two signals and **automatically re-enables sleep** (and
+sends a macOS notification) if either persists for 30 seconds:
 
 | Signal | Default trip threshold |
 |---|---|
-| Thermal pressure (OS-level) | ≥ Serious |
+| Thermal pressure (macOS thermal state) | ≥ Serious |
 | CPU usage | ≥ 60% |
 
 Thresholds are one-line constants at the top of `Sources/main.swift`.
@@ -24,50 +30,84 @@ Thresholds are one-line constants at the top of `Sources/main.swift`.
 
 ## Requirements
 
-- macOS 13 or later (Apple Silicon or Intel)
-- Xcode Command Line Tools (`xcode-select --install`)
+- macOS 12 (Monterey) or later — Intel or Apple Silicon
+- Xcode Command Line Tools: `xcode-select --install`
 
 ---
 
-## Installation
+## Quick install
+
+```bash
+git clone https://github.com/fabioveneto/toggle-mac-lid-sleep.git
+cd toggle-mac-lid-sleep
+bash install.sh
+```
+
+`install.sh` will ask for your password **once** to create the sudoers rule, then build the app and
+copy it to `/Applications`.
+
+Launch it:
+
+```bash
+open "/Applications/Toggle Sleep.app"
+```
+
+The app has no Dock icon — look for the MacBook icon in your menu bar.
+
+### Launch at login (optional)
+
+**System Settings → General → Login Items** → click **+** → select Toggle Sleep.
+
+---
+
+## Manual install
+
+If you prefer to run each step yourself:
 
 ### 1. Grant passwordless sudo for pmset
-
-The app needs root to run `pmset`. This one-time setup creates a locked-down sudoers rule that grants passwordless access to exactly two commands and nothing else.
 
 ```bash
 sudo bash scripts/install-sudoers.sh
 ```
 
-Verify it worked:
+Verify it worked (no password prompt = success):
 
 ```bash
 sudo -n /usr/bin/pmset -a disablesleep 0 && echo "OK"
 ```
 
-### 2. Build the app
+### 2. Build
 
 ```bash
 bash build.sh
 ```
 
-This produces `Toggle Sleep.app` in the project directory. To also copy it to `/Applications`:
+Produces `Toggle Sleep.app` in the project directory. To also copy it to `/Applications`:
 
 ```bash
 bash build.sh --install
 ```
 
-### 3. Run it
+### 3. Run
 
 ```bash
 open "Toggle Sleep.app"
 ```
 
-The app has no Dock icon. Look for the MacBook icon in the menu bar.
+---
 
-### 4. Launch at login (optional)
+## Uninstall
 
-Open **System Settings → General → Login Items** and add `Toggle Sleep.app`.
+```bash
+sudo bash uninstall.sh
+```
+
+This will:
+1. Quit the app (if running)
+2. Restore `disablesleep 0` (normal sleep)
+3. Remove the sudoers rule from `/etc/sudoers.d/toggle-sleep`
+4. Delete `/Applications/Toggle Sleep.app`
+5. Remove app preferences
 
 ---
 
@@ -78,11 +118,11 @@ Click the menu bar icon to open the menu:
 ```
 Keep Awake: OFF
 ☑ Disable lid-close sleep
-─────────────────────
+─────────────────────────
 Thermal: Nominal
 CPU Usage: 4%
 Trip at Thermal ≥ Serious or CPU ≥ 60%
-─────────────────────
+─────────────────────────
 Quit
 ```
 
@@ -94,7 +134,7 @@ Quit
 
 ## Adjusting thresholds
 
-Open `Sources/main.swift` and edit the constants at the top of the file:
+Edit the constants at the top of `Sources/main.swift`:
 
 ```swift
 let thermalTripState = ProcessInfo.ThermalState.serious  // .fair | .serious | .critical
@@ -103,9 +143,12 @@ let pollIntervalSec  = 12.0   // seconds between CPU polls
 let sustainSec       = 30.0   // how long condition must hold before tripping
 ```
 
-Thermal states in order: `nominal → fair → serious → critical`. Apple Silicon throttles the CPU near `serious`; `critical` means the system is at risk. Starting at `serious` is conservative — raise to `critical` if the safeguard trips too often during normal agent workloads.
+Thermal states in order: `nominal → fair → serious → critical`. The `serious` state means macOS is
+actively throttling due to heat; `critical` means the system is at risk. Start with `serious` (the
+conservative default) and raise to `critical` if the safeguard trips too often during normal
+workloads.
 
-Then rebuild and relaunch:
+Rebuild and relaunch after any change:
 
 ```bash
 bash build.sh && pkill -f "Toggle Sleep"; open "Toggle Sleep.app"
@@ -115,11 +158,56 @@ bash build.sh && pkill -f "Toggle Sleep"; open "Toggle Sleep.app"
 
 ## How the sudoers rule works
 
-The file installed at `/etc/sudoers.d/toggle-sleep` looks like this:
+The installer creates `/etc/sudoers.d/toggle-sleep` with two exact-match entries:
 
 ```
-fabio ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0
-fabio ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1
+<your-username> ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0
+<your-username> ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1
 ```
 
-These are exact-match rules — only those two specific invocations are passwordless. Any other `sudo` command still requires your password. To remove it: `sudo rm /etc/sudoers.d/toggle-sleep`.
+`<your-username>` is filled in automatically by `scripts/install-sudoers.sh` using `logname`.
+
+These are exact-match rules — only those two specific invocations are passwordless. Any other
+`sudo` command still requires your password. To remove the rule manually:
+
+```bash
+sudo rm /etc/sudoers.d/toggle-sleep
+```
+
+---
+
+## Why thermal state instead of a °C reading
+
+The `smc` temperature sampler was removed from `powermetrics` in macOS 26. Rather than relying on
+private/changing APIs, Toggle Sleep uses `ProcessInfo.thermalState` — the OS's own thermal signal.
+It works on all macOS versions from 12 onwards, on both Intel and Apple Silicon, and requires no
+root access. The trade-off is that it reports a category (Nominal / Fair / Serious / Critical) rather
+than an exact temperature, but for a safeguard that's more actionable anyway.
+
+---
+
+## Troubleshooting
+
+**Menu bar icon doesn't appear**  
+Your menu bar may be full. Try hiding other status items, or check if the app is actually running:
+`pgrep -f "Toggle Sleep"`.
+
+**Toggle has no effect / pmset fails silently**  
+Verify the sudoers rule is in place and working:
+```bash
+sudo -n /usr/bin/pmset -a disablesleep 0 && echo "sudoers OK"
+```
+If that fails with "a password is required", re-run `sudo bash scripts/install-sudoers.sh`.
+
+**Safeguard trips immediately**  
+The default CPU threshold (60%) may be too conservative for your workload. Raise `cpuThresholdPct`
+in `Sources/main.swift`, rebuild, and relaunch.
+
+**Sleep isn't restored after quitting**  
+If the app was force-quit, run: `sudo pmset -a disablesleep 0`
+
+---
+
+## License
+
+[MIT](LICENSE)
