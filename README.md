@@ -14,12 +14,13 @@ or long-running tasks alive on a MacBook.
 
 ## What it does
 
-Two independent toggles in the menu bar:
+Three independent toggles in the menu bar:
 
 | Toggle | What it does | Requires root |
 |---|---|---|
 | **Disable lid-close sleep** | Runs `pmset -a disablesleep 1` — lid can close without the Mac sleeping. Useful for running agents on a closed laptop. | Yes (sudoers rule) |
 | **Caffeinate (lid open)** | Runs `caffeinate -i` — prevents idle sleep while the lid is open (display may still turn off). Works on battery and AC. | No |
+| **Caffeinate + screen off** | Runs `caffeinate -i` and immediately turns the display off. Useful for short commutes where you want to keep processes running without closing the lid — the machine stays awake while the screen stays dark. | No |
 
 Both toggles remember their state across restarts.
 
@@ -133,6 +134,7 @@ Click the menu bar icon to open the menu:
 ```
 ☑ Disable lid-close sleep
 ☐ Caffeinate (lid open)
+☐ Caffeinate + screen off
 ──────────────────────────────
 Thermal: Nominal
 CPU Usage: 4%
@@ -143,6 +145,7 @@ Quit
 
 - **Disable lid-close sleep** — prevents sleep when the lid closes (checkmark = active); thermal watchdog runs while this is ON
 - **Caffeinate (lid open)** — prevents idle sleep while the lid is open; display may still turn off (checkmark = active); no watchdog
+- **Caffeinate + screen off** — prevents idle sleep and turns the display off immediately; useful for short commutes where you want to keep processes running without the screen on; auto-unchecks when the lid closes; no watchdog
 - **Thermal / CPU Usage** — live readings, shown only while lid-close sleep is ON
 - **Quit** — restores `disablesleep 0` and kills caffeinate before exiting
 
