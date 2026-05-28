@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var prevTicks: (u: UInt32, s: UInt32, i: UInt32, n: UInt32)?
     // Long-lived caffeinate child process (no root needed)
     private var caffeinateProcess: Process?
+    private var caffeinateScreenOffProcess: Process?
 
     private var keepAwake: Bool {
         get { UserDefaults.standard.bool(forKey: "keepAwake") }
@@ -58,6 +59,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isCaffeinating: Bool {
         get { UserDefaults.standard.bool(forKey: "isCaffeinating") }
         set { UserDefaults.standard.set(newValue, forKey: "isCaffeinating"); applyCaffeinate(newValue) }
+    }
+
+    private var isCaffeinatingScreenOff: Bool {
+        get { UserDefaults.standard.bool(forKey: "isCaffeinatingScreenOff") }
+        set { UserDefaults.standard.set(newValue, forKey: "isCaffeinatingScreenOff"); applyCaffeinateScreenOff(newValue) }
     }
 
     func applicationDidFinishLaunching(_: Notification) {
@@ -76,11 +82,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
         applyLidSleep(keepAwake)
         applyCaffeinate(isCaffeinating)
+        applyCaffeinateScreenOff(isCaffeinatingScreenOff)
     }
 
     func applicationWillTerminate(_: Notification) {
         if keepAwake { setPmset(false) }
         caffeinateProcess?.terminate()
+        caffeinateScreenOffProcess?.terminate()
     }
 
     // MARK: - Feature state
@@ -108,6 +116,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
+    private func applyCaffeinateScreenOff(_ on: Bool) {
+        if on {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+            p.arguments = ["-i"]
+            try! p.run()
+            caffeinateScreenOffProcess = p
+            run("/usr/bin/pmset", ["displaysleepnow"])
+        } else {
+            caffeinateScreenOffProcess?.terminate()
+            caffeinateScreenOffProcess = nil
+        }
+        updateIcon()
+        rebuildMenu()
+    }
+
     // Watchdog only runs for lid-close sleep (lid closed = heat risk). Caffeinate needs no safeguard.
     private func updateWatchdog() {
         let active = keepAwake
@@ -121,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateIcon() {
-        let on = keepAwake || isCaffeinating
+        let on = keepAwake || isCaffeinating || isCaffeinatingScreenOff
         let name = on ? "laptopcomputer" : "macbook"
         if let img = NSImage(systemSymbolName: name, accessibilityDescription: nil) {
             img.isTemplate = true
@@ -146,6 +170,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cafToggle.target = self
         m.addItem(cafToggle)
 
+        let cafScreenOffToggle = NSMenuItem(title: "Caffeinate + screen off",
+                                            action: #selector(onCafScreenOffToggle), keyEquivalent: "")
+        cafScreenOffToggle.state  = isCaffeinatingScreenOff ? .on : .off
+        cafScreenOffToggle.target = self
+        m.addItem(cafScreenOffToggle)
+
         m.addItem(.separator())
 
         func info(_ title: String) -> NSMenuItem {
@@ -169,6 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func onLidToggle() { keepAwake = !keepAwake }
     @objc private func onCafToggle() { isCaffeinating = !isCaffeinating }
+    @objc private func onCafScreenOffToggle() { isCaffeinatingScreenOff = !isCaffeinatingScreenOff }
 
     // MARK: - Watchdog
 
@@ -187,10 +218,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func systemWillSleep() {
-        // caffeinate -i doesn't block lid-close sleep, so if the system is sleeping
-        // and keepAwake is off, the lid just closed — turn caffeinate off automatically.
-        guard isCaffeinating && !keepAwake else { return }
-        isCaffeinating = false
+        // Lid closed with keepAwake ON: disablesleep 1 will block the system sleep, but macOS
+        // may leave the display framebuffer active. Sleep it explicitly before the cancel lands.
+        if keepAwake {
+            let (_, code) = run("/usr/bin/pmset", ["displaysleepnow"])
+            if code != 0 { NSLog("[ToggleSleep] displaysleepnow failed (exit %d)", code) }
+        }
+        // Caffeinate: caffeinate -i doesn't block lid-close sleep, so if the system is
+        // actually sleeping and keepAwake is off, the lid just closed — turn caffeinate off.
+        if isCaffeinating && !keepAwake {
+            isCaffeinating = false
+        }
+        if isCaffeinatingScreenOff && !keepAwake {
+            isCaffeinatingScreenOff = false
+        }
     }
 
     @objc private func thermalStateChanged() {
