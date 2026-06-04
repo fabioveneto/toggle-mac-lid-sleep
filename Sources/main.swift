@@ -79,6 +79,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selector: #selector(systemWillSleep),
             name: NSWorkspace.willSleepNotification,
             object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(screensDidWake),
+            name: NSWorkspace.screensDidWakeNotification,
+            object: nil)
         rebuildMenu()
         applyLidSleep(keepAwake)
         applyCaffeinate(isCaffeinating)
@@ -215,6 +220,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let thermal = ProcessInfo.processInfo.thermalState
         let cpu     = cpuUsagePct()
         onPollResult(thermal: thermal, cpu: cpu)
+    }
+
+    @objc private func screensDidWake() {
+        if isCaffeinatingScreenOff { isCaffeinatingScreenOff = false }
     }
 
     @objc private func systemWillSleep() {
